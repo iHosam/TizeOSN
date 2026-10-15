@@ -2,13 +2,12 @@
   "name": "tizeosn",
   "type": "module",
   "appName": "TizeOSN",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "TizeOSN is an ad-free, sponsor-free and enhanced client for OSN+ on Samsung Smart TVs (Tizen OS), launched via TizenBrew.",
   "packageType": "mods",
   "websiteURL": "https://osnplus.com",
   "main": "dist/userScript.js",
   "author": "TizeOSN Contributors",
-  "evaluateScriptOnDocumentStart": true,
   "keys": [
     "MediaPlayPause",
     "MediaPlay",
@@ -17,11 +16,7 @@
     "MediaFastForward",
     "MediaRewind",
     "MediaTrackNext",
-    "MediaTrackPrevious",
-    "ColorF0Red",
-    "ColorF1Green",
-    "ColorF2Yellow",
-    "ColorF3Blue"
+    "MediaTrackPrevious"
   ],
   "scripts": {
     "build": "rollup -c",

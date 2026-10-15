@@ -213,55 +213,50 @@ function initImaMock() {
   window.google = window.google || {};
   if (window.google.ima) return;
 
-  const noop = () => {};
-
-  class MockAdsLoader {
-    constructor() {
-      this.settings = {};
-    }
-    contentComplete() {}
-    getSettings() { return this.settings; }
-    requestAds() {
-      setTimeout(() => {
-        if (typeof this._onLoaded === 'function') {
-          this._onLoaded({
-            getAdsManager: () => new MockAdsManager()
-          });
-        }
-      }, 20);
-    }
-    addEventListener(type, handler) {
-      if (type === 'adsManagerLoaded') this._onLoaded = handler;
-    }
+  function MockAdsLoader() {
+    this.settings = {};
   }
+  MockAdsLoader.prototype.contentComplete = function () {};
+  MockAdsLoader.prototype.getSettings = function () { return this.settings; };
+  MockAdsLoader.prototype.requestAds = function () {
+    var self = this;
+    setTimeout(function () {
+      if (typeof self._onLoaded === 'function') {
+        self._onLoaded({
+          getAdsManager: function () { return new MockAdsManager(); }
+        });
+      }
+    }, 20);
+  };
+  MockAdsLoader.prototype.addEventListener = function (type, handler) {
+    if (type === 'adsManagerLoaded') this._onLoaded = handler;
+  };
 
-  class MockAdsManager {
-    init() {}
-    start() {
-      setTimeout(() => {
-        if (typeof this._onEvent === 'function') {
-          // Tell host player ads are done and to resume video
-          this._onEvent({ type: 'allAdsCompleted' });
-          this._onEvent({ type: 'contentResumeRequested' });
-        }
-      }, 10);
-    }
-    stop() {}
-    pause() {}
-    resume() {}
-    destroy() {}
-    setVolume() {}
-    getVolume() { return 1; }
-    resize() {}
-    addEventListener(type, handler) {
-      this._onEvent = handler;
-    }
-  }
+  function MockAdsManager() {}
+  MockAdsManager.prototype.init = function () {};
+  MockAdsManager.prototype.start = function () {
+    var self = this;
+    setTimeout(function () {
+      if (typeof self._onEvent === 'function') {
+        self._onEvent({ type: 'allAdsCompleted' });
+        self._onEvent({ type: 'contentResumeRequested' });
+      }
+    }, 10);
+  };
+  MockAdsManager.prototype.stop = function () {};
+  MockAdsManager.prototype.pause = function () {};
+  MockAdsManager.prototype.resume = function () {};
+  MockAdsManager.prototype.destroy = function () {};
+  MockAdsManager.prototype.setVolume = function () {};
+  MockAdsManager.prototype.getVolume = function () { return 1; };
+  MockAdsManager.prototype.resize = function () {};
+  MockAdsManager.prototype.addEventListener = function (type, handler) {
+    this._onEvent = handler;
+  };
 
-  class MockAdDisplayContainer {
-    initialize() {}
-    destroy() {}
-  }
+  function MockAdDisplayContainer() {}
+  MockAdDisplayContainer.prototype.initialize = function () {};
+  MockAdDisplayContainer.prototype.destroy = function () {};
 
   window.google.ima = {
     AdDisplayContainer: MockAdDisplayContainer,
