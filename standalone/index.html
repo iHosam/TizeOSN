@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TizeOSN - Ad-Free OSN+</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background-color: #080c16;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Cairo", sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        .logo-icon {
+            font-size: 72px;
+            filter: drop-shadow(0 0 25px rgba(56, 189, 248, 0.6));
+        }
+        .logo-title {
+            font-size: 64px;
+            font-weight: 800;
+            letter-spacing: -1px;
+            background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .badge {
+            background: #0284c7;
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: 700;
+            padding: 6px 16px;
+            border-radius: 9999px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 8px;
+        }
+        .subtitle {
+            font-size: 22px;
+            color: #94a3b8;
+            margin-bottom: 40px;
+            font-weight: 500;
+        }
+        .progress-container {
+            position: relative;
+            width: 380px;
+            height: 6px;
+            background-color: rgba(56, 189, 248, 0.2);
+            border-radius: 3px;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+        }
+        .progress-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            background: linear-gradient(90deg, #38bdf8, #818cf8);
+            border-radius: 3px;
+            animation: indeterminate 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        }
+        @keyframes indeterminate {
+            0% { left: 0%; width: 0; }
+            50% { left: 25%; width: 75%; }
+            100% { left: 100%; width: 0; }
+        }
+        .status-text {
+            margin-top: 20px;
+            font-size: 16px;
+            color: #64748b;
+        }
+    </style>
+    <script>
+        "use strict";
+
+        // Register TV Remote Keys if running in Tizen TV
+        if (typeof tizen !== 'undefined' && tizen.tvinputdevice && tizen.tvinputdevice.registerKey) {
+            const keys = [
+                "ColorF0Red",
+                "ColorF1Green",
+                "ColorF2Yellow",
+                "ColorF3Blue",
+                "MediaPlayPause",
+                "MediaPlay",
+                "MediaPause",
+                "MediaStop",
+                "MediaFastForward",
+                "MediaRewind",
+                "MediaTrackNext",
+                "MediaTrackPrevious"
+            ];
+            for (let i = 0; i < keys.length; i++) {
+                try {
+                    tizen.tvinputdevice.registerKey(keys[i]);
+                } catch (e) {}
+            }
+        }
+
+        // Redirect to OSN+ with injected modifications
+        window.addEventListener('DOMContentLoaded', function () {
+            setTimeout(function () {
+                window.location.href = "https://osnplus.com";
+            }, 1200);
+        });
+    </script>
+</head>
+<body>
+    <div class="logo-container">
+        <span class="logo-icon">🛡️</span>
+        <div>
+            <h1 class="logo-title">TizeOSN</h1>
+            <span class="badge">Ad-Free Edition</span>
+        </div>
+    </div>
+    <div class="subtitle">Launching OSN+ for Samsung Smart TV...</div>
+    <div class="progress-container">
+        <div class="progress-bar"></div>
+    </div>
+    <div class="status-text">Powered by TizenBrew</div>
+</body>
+</html>
