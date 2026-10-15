@@ -2,7 +2,7 @@
   "name": "tizeosn",
   "type": "module",
   "appName": "TizeOSN",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "TizeOSN is an ad-free, sponsor-free and enhanced client for OSN+ on Samsung Smart TVs (Tizen OS), launched via TizenBrew.",
   "packageType": "mods",
   "websiteURL": "https://tizen.osnplus.com",

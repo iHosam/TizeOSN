@@ -62,7 +62,7 @@ TizenBrew is a homebrew loader and package manager for Samsung Tizen TVs that al
 3. Scroll to the right and select the tile named **Add GitHub Module**.
 4. In the text input (`Module Name (For gh):`), enter:
    ```text
-   iHosam/TizeOSN@v1.0.3
+   iHosam/TizeOSN@v1.0.4
    ```
    *(Note: Do **not** type `gh/`, as TizenBrew automatically adds the prefix).*
 5. Press **Done / Enter** on your TV's on-screen keyboard.

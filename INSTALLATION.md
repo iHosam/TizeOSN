@@ -31,16 +31,16 @@ Ensure you have the latest version of TizenBrew installed and running on your TV
 ### Step 4: Enter the Repository Name
 In the text box labeled `Module Name (For gh):`, type:
 ```text
-iHosam/TizeOSN@v1.0.3
+iHosam/TizeOSN@v1.0.4
 ```
 *(Important: Do **NOT** prefix it with `gh/`. TizenBrew already handles the `gh/` prefix when you select the GitHub tile).*
 
 3. Press **Done / Enter** on your TV's virtual keyboard.
-4. TizenBrew will register `gh/iHosam/TizeOSN@v1.0.3` and navigate back to the module list.
+4. TizenBrew will register `gh/iHosam/TizeOSN@v1.0.4` and navigate back to the module list.
 
 ### Step 5: Launch TizeOSN
 1. Return to the TizenBrew **Home** screen.
-2. Select the **TizeOSN (1.0.3)** tile and press Enter.
+2. Select the **TizeOSN (1.0.4)** tile and press Enter.
 3. OSN+ will launch with full ad-blocking and enhancements activated!
 
 ---

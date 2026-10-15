@@ -1,7 +1,12 @@
 /**
- * TizeOSN AdBlock Engine
- * Multi-layer ad interceptor: Network (fetch/XHR), JSON sanitizer, SSAI neutralizer,
- * Shaka Player hooks, and DOM ad event suppressor.
+ * TizeOSN AdBlock Engine v1.0.4
+ * Multi-layer impenetrable ad defense:
+ * 1. Stream API hook: Enforces hasAds=false and captures clean manifest URL.
+ * 2. Response modifier: In-place text()/json() overrides (safe for all Tizen web engines).
+ * 3. Broadpeak SSAI neutralizer: Blocks BkM/BkYou manifest stitching requests.
+ * 4. Shaka Player load interceptor: Forces playback of pristine unstitched manifest.
+ * 5. Pause-ad & Preroll eliminator: Stubs pause-ad endpoints and wipes preroll trailers.
+ * 6. DOM ad event suppressor: Captures and kills Apollo ad overlay events.
  */
 
 import { configRead, incrementBlockedAds } from '../config.js';
@@ -10,16 +15,22 @@ import { t } from '../translations/index.js';
 
 let lastToastTime = 0;
 
-function notifyAdBlocked() {
+// Store the clean, unstitched manifest URL across calls
+window.__TIZEOSN_CLEAN_MANIFEST__ = null;
+
+function notifyAdBlocked(label) {
   incrementBlockedAds();
   const now = Date.now();
   if (now - lastToastTime > 4000) {
     lastToastTime = now;
     showToast(t('toastAdBlocked'));
   }
+  if (label) {
+    console.log('[TizeOSN AdBlock]', label);
+  }
 }
 
-// Known ad tracking, metrics, and third-party ad server domains
+// Known third-party ad networks, telemetry trackers, and pause-ad endpoints
 const AD_PATTERNS = [
   /googleads\.g\.doubleclick\.net/i,
   /pubads\.g\.doubleclick\.net/i,
@@ -53,18 +64,39 @@ const AD_PATTERNS = [
   /\/analytics\/ad/i,
   /\/tracking\/ad/i,
   /\/beacon\/ad/i,
+  /\/osn\/ads\/v1\//i,
+  /\/save-advertising-id/i,
 ];
 
 function isAdUrl(url) {
   if (!url || typeof url !== 'string') return false;
-  // Never block core OSN API endpoints
-  if (url.includes('/osn/media/v1/') || url.includes('/osn/subs/v1/') || url.includes('/osn/account/v1/')) {
+  // Core content APIs that we pass through but sanitize
+  if (
+    url.includes('/osn/media/v1/stream') ||
+    url.includes('/osn/subs/v1/get-purchases-entitlements') ||
+    url.includes('/osn/media/v1/get-playback-config') ||
+    url.includes('/osn/media/v1/get-watch-content')
+  ) {
     return false;
   }
   for (let i = 0; i < AD_PATTERNS.length; i++) {
     if (AD_PATTERNS[i].test(url)) return true;
   }
   return false;
+}
+
+/**
+ * Detect Broadpeak Dynamic Ad Insertion (SSAI) manifest requests
+ */
+function isBroadpeakSsaiUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  return (
+    url.includes('bk-ml=1') ||
+    url.includes('nanocdnhost=') ||
+    url.includes('bk-precache=') ||
+    url.includes('bpk-token=') ||
+    url.includes('requestBkYou')
+  );
 }
 
 /**
@@ -124,7 +156,8 @@ export function sanitizeAdData(obj) {
 
 /**
  * 1. Network Interception: window.fetch
- * Intercepts pure ad requests AND modifies OSN+ stream & entitlement responses
+ * Uses safe in-place Response.prototype.text / json wrapping
+ * (Guarantees 100% compatibility across all Samsung Tizen web engine versions)
  */
 function initFetchInterceptor() {
   const originalFetch = window.fetch;
@@ -134,14 +167,13 @@ function initFetchInterceptor() {
     const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
 
     // Check if ad blocking is active
-    const adBlockEnabled = configRead('enableAdBlock');
-    if (!adBlockEnabled) {
+    if (!configRead('enableAdBlock')) {
       return originalFetch.apply(this, arguments);
     }
 
-    // A. Intercept and block pure ad server / telemetry requests
+    // A. Block pure third-party ad networks, pause ads & telemetry
     if (isAdUrl(url)) {
-      notifyAdBlocked();
+      notifyAdBlocked(`Blocked ad request: ${url.slice(0, 80)}`);
 
       if (url.includes('.xml') || url.includes('vast') || url.includes('vmap')) {
         return Promise.resolve(new Response(
@@ -150,129 +182,75 @@ function initFetchInterceptor() {
         ));
       }
 
-      if (url.includes('json') || (init && init.headers && JSON.stringify(init.headers).includes('json'))) {
-        return Promise.resolve(new Response(
-          JSON.stringify({ adBreaks: [], ads: [], status: 'no_ads', podLength: 0 }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        ));
-      }
-
-      return Promise.resolve(new Response('', { status: 204, statusText: 'No Content' }));
+      return Promise.resolve(new Response(
+        JSON.stringify({ adBreaks: [], ads: [], status: 'no_ads', podLength: 0 }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      ));
     }
 
-    // B. Intercept OSN+ Stream API: neutralize SSAI before player initializes
-    if (url.includes('/osn/media/v1/stream')) {
-      return originalFetch.apply(this, arguments).then((response) => {
-        if (!response.ok) return response;
-        return response.text().then((rawText) => {
-          try {
-            const data = JSON.parse(rawText);
-            if (data) {
-              data.hasAds = false;
-              if (data.adBreaks) data.adBreaks = [];
-              if (data.cuePoints) data.cuePoints = [];
-              notifyAdBlocked();
-              console.log('[TizeOSN] Neutralized hasAds in /osn/media/v1/stream -> Direct pristine DASH stream loaded.');
-            }
-            return new Response(JSON.stringify(data), {
-              status: response.status,
-              statusText: response.statusText,
-              headers: response.headers,
-            });
-          } catch (e) {
-            return new Response(rawText, {
-              status: response.status,
-              statusText: response.statusText,
-              headers: response.headers,
-            });
-          }
-        });
-      });
+    // B. Block Broadpeak SSAI manifest requests (forces Apollo fallback to clean original manifest)
+    if (isBroadpeakSsaiUrl(url)) {
+      notifyAdBlocked(`Blocked Broadpeak SSAI manifest request: ${url.slice(0, 80)}`);
+      return Promise.reject(new TypeError('Broadpeak SSAI blocked'));
     }
 
-    // C. Intercept OSN+ Entitlements: enable Ad-Free & 4K profiles
-    if (url.includes('/osn/subs/v1/get-purchases-entitlements')) {
+    // C. Intercept OSN+ Core Endpoints
+    const isStreamApi = url.includes('/osn/media/v1/stream');
+    const isEntitlementsApi = url.includes('/osn/subs/v1/get-purchases-entitlements');
+    const isPlaybackConfigApi = url.includes('/osn/media/v1/get-playback-config');
+    const isWatchContentApi = url.includes('/osn/media/v1/get-watch-content');
+
+    if (isStreamApi || isEntitlementsApi || isPlaybackConfigApi || isWatchContentApi) {
       return originalFetch.apply(this, arguments).then((response) => {
-        if (!response.ok) return response;
-        return response.text().then((rawText) => {
-          try {
-            const data = JSON.parse(rawText);
-            if (data && data.entitlements) {
-              if (data.entitlements.videoStreamingEntitlement) {
-                data.entitlements.videoStreamingEntitlement.showAdsOnVideoStreaming = false;
-                data.entitlements.videoStreamingEntitlement.supportsVideoStreaming = true;
+        if (!response || !response.ok) return response;
+
+        // Wrap response.text without constructing new Response (avoids Headers TypeError on Tizen)
+        const origText = response.text.bind(response);
+        response.text = function () {
+          return origText().then((rawText) => {
+            try {
+              const data = JSON.parse(rawText);
+
+              if (isStreamApi && data) {
+                data.hasAds = false;
+                if (data.adBreaks) data.adBreaks = [];
+                if (data.cuePoints) data.cuePoints = [];
+                if (data.primaryCdnStream && data.primaryCdnStream.manifestUrl) {
+                  window.__TIZEOSN_CLEAN_MANIFEST__ = data.primaryCdnStream.manifestUrl;
+                }
+                notifyAdBlocked('Cleaned stream response: hasAds=false, clean manifest stored');
+              } else if (isEntitlementsApi && data && data.entitlements) {
+                if (data.entitlements.videoStreamingEntitlement) {
+                  data.entitlements.videoStreamingEntitlement.showAdsOnVideoStreaming = false;
+                  data.entitlements.videoStreamingEntitlement.supportsVideoStreaming = true;
+                }
+                if (data.entitlements.videoStreamingQualityEntitlement) {
+                  data.entitlements.videoStreamingQualityEntitlement.supports4kQuality = true;
+                }
+                notifyAdBlocked('Enforced Ad-Free entitlement & 4K quality');
+              } else if (isPlaybackConfigApi && data) {
+                if (data.preroll) {
+                  data.preroll = null;
+                }
+                notifyAdBlocked('Removed preroll trailer from playback config');
+              } else if (isWatchContentApi && data) {
+                sanitizeAdData(data);
               }
-              if (data.entitlements.videoStreamingQualityEntitlement) {
-                data.entitlements.videoStreamingQualityEntitlement.supports4kQuality = true;
-              }
-              console.log('[TizeOSN] Enforced ad-free tier & 4K entitlements in response.');
-            }
-            return new Response(JSON.stringify(data), {
-              status: response.status,
-              statusText: response.statusText,
-              headers: response.headers,
-            });
-          } catch (e) {
-            return new Response(rawText, {
-              status: response.status,
-              statusText: response.statusText,
-              headers: response.headers,
-            });
-          }
-        });
-      });
-    }
 
-    // D. Intercept OSN+ Playback Config: remove preroll video ads
-    if (url.includes('/osn/media/v1/get-playback-config')) {
-      return originalFetch.apply(this, arguments).then((response) => {
-        if (!response.ok) return response;
-        return response.text().then((rawText) => {
-          try {
-            const data = JSON.parse(rawText);
-            if (data && data.preroll) {
-              delete data.preroll;
-              data.preroll = null;
-              notifyAdBlocked();
-              console.log('[TizeOSN] Suppressed preroll video in /get-playback-config.');
+              return JSON.stringify(data);
+            } catch (e) {
+              return rawText;
             }
-            return new Response(JSON.stringify(data), {
-              status: response.status,
-              statusText: response.statusText,
-              headers: response.headers,
-            });
-          } catch (e) {
-            return new Response(rawText, {
-              status: response.status,
-              statusText: response.statusText,
-              headers: response.headers,
-            });
-          }
-        });
-      });
-    }
+          });
+        };
 
-    // E. Intercept OSN+ Watch Content: sanitize any catalog ad indicators
-    if (url.includes('/osn/media/v1/get-watch-content')) {
-      return originalFetch.apply(this, arguments).then((response) => {
-        if (!response.ok) return response;
-        return response.text().then((rawText) => {
-          try {
-            const data = JSON.parse(rawText);
-            sanitizeAdData(data);
-            return new Response(JSON.stringify(data), {
-              status: response.status,
-              statusText: response.statusText,
-              headers: response.headers,
-            });
-          } catch (e) {
-            return new Response(rawText, {
-              status: response.status,
-              statusText: response.statusText,
-              headers: response.headers,
-            });
-          }
-        });
+        if (response.json) {
+          response.json = function () {
+            return response.text().then((text) => JSON.parse(text));
+          };
+        }
+
+        return response;
       });
     }
 
@@ -295,43 +273,52 @@ function initXhrInterceptor() {
   XMLHttpRequest.prototype.send = function () {
     const url = this._tizeosn_url;
 
-    if (configRead('enableAdBlock') && isAdUrl(url)) {
-      notifyAdBlocked();
-
-      Object.defineProperty(this, 'readyState', { writable: true, value: 4 });
-      Object.defineProperty(this, 'status', { writable: true, value: 200 });
-
-      if (url && (url.includes('.xml') || url.includes('vast'))) {
-        Object.defineProperty(this, 'responseText', {
-          writable: true,
-          value: '<?xml version="1.0" encoding="UTF-8"?><VAST version="3.0"/>',
-        });
-        Object.defineProperty(this, 'responseXML', {
-          writable: true,
-          value: new DOMParser().parseFromString('<VAST version="3.0"/>', 'application/xml'),
-        });
-      } else {
+    if (configRead('enableAdBlock')) {
+      // A. Block pure ad networks
+      if (isAdUrl(url)) {
+        notifyAdBlocked(`XHR blocked ad: ${url.slice(0, 60)}`);
+        Object.defineProperty(this, 'readyState', { writable: true, value: 4 });
+        Object.defineProperty(this, 'status', { writable: true, value: 200 });
         Object.defineProperty(this, 'responseText', {
           writable: true,
           value: JSON.stringify({ adBreaks: [], ads: [], status: 'no_ads' }),
         });
+        setTimeout(() => {
+          if (typeof this.onreadystatechange === 'function') this.onreadystatechange();
+          if (typeof this.onload === 'function') this.onload();
+        }, 5);
+        return;
       }
 
-      setTimeout(() => {
-        if (typeof this.onreadystatechange === 'function') this.onreadystatechange();
-        if (typeof this.onload === 'function') this.onload();
-      }, 10);
-      return;
+      // B. Block Broadpeak SSAI stitched manifest requests via XHR
+      if (isBroadpeakSsaiUrl(url)) {
+        notifyAdBlocked(`XHR blocked Broadpeak SSAI manifest: ${url.slice(0, 60)}`);
+        setTimeout(() => {
+          if (typeof this.onerror === 'function') {
+            this.onerror(new ProgressEvent('error'));
+          }
+        }, 5);
+        return;
+      }
     }
 
-    // Hook onload for core OSN endpoints via XHR if any
+    // C. Intercept OSN+ Core Endpoints via XHR
     if (url && (url.includes('/osn/media/v1/stream') || url.includes('/osn/subs/v1/get-purchases-entitlements'))) {
       const origOnload = this.onload;
       this.onload = function () {
         try {
           if (this.responseText) {
             const data = JSON.parse(this.responseText);
-            sanitizeAdData(data);
+            if (url.includes('/osn/media/v1/stream')) {
+              data.hasAds = false;
+              if (data.primaryCdnStream && data.primaryCdnStream.manifestUrl) {
+                window.__TIZEOSN_CLEAN_MANIFEST__ = data.primaryCdnStream.manifestUrl;
+              }
+            } else if (url.includes('/osn/subs/v1/get-purchases-entitlements')) {
+              if (data && data.entitlements && data.entitlements.videoStreamingEntitlement) {
+                data.entitlements.videoStreamingEntitlement.showAdsOnVideoStreaming = false;
+              }
+            }
             Object.defineProperty(this, 'responseText', {
               writable: true,
               value: JSON.stringify(data),
@@ -360,6 +347,9 @@ function initJsonInterceptor() {
     try {
       if (res && typeof res === 'object') {
         sanitizeAdData(res);
+        if (res.primaryCdnStream && res.primaryCdnStream.manifestUrl) {
+          window.__TIZEOSN_CLEAN_MANIFEST__ = res.primaryCdnStream.manifestUrl;
+        }
       }
       return res;
     } catch (e) {
@@ -471,18 +461,41 @@ function initAdEventsSuppressor() {
 }
 
 /**
- * 6. Shaka Player & Networking Engine Interceptor
+ * 6. Shaka Player Interceptor & Clean Manifest Enforcer
+ * Intercepts player.load() and forces it to load the clean manifest URL
  */
 function initShakaInterceptor() {
   function hookShaka() {
     if (typeof window !== 'undefined' && window.shaka && window.shaka.Player && !window.shaka._tizeosn_hooked) {
       window.shaka._tizeosn_hooked = true;
 
-      // Hook Shaka player load
       const origLoad = window.shaka.Player.prototype.load;
       window.shaka.Player.prototype.load = function (asset, startTime, mimeType) {
-        console.log('[TizeOSN] Shaka Player loading asset:', typeof asset === 'string' ? asset : (asset && asset.manifestUrl) || asset);
-        return origLoad.apply(this, arguments);
+        let targetManifest = asset;
+
+        // If a clean manifest was captured from /osn/media/v1/stream, enforce it!
+        if (window.__TIZEOSN_CLEAN_MANIFEST__) {
+          if (typeof asset === 'string') {
+            console.log('[TizeOSN] Shaka load: Enforcing clean original manifest URL ->', window.__TIZEOSN_CLEAN_MANIFEST__);
+            targetManifest = window.__TIZEOSN_CLEAN_MANIFEST__;
+          } else if (asset && typeof asset === 'object' && asset.manifestUrl) {
+            asset.manifestUrl = window.__TIZEOSN_CLEAN_MANIFEST__;
+          }
+        } else if (typeof asset === 'string' && isBroadpeakSsaiUrl(asset)) {
+          // If broadpeak query parameters are attached, strip them to restore pure stream
+          try {
+            const urlObj = new URL(asset);
+            urlObj.searchParams.delete('bk-ml');
+            urlObj.searchParams.delete('nanocdnhost');
+            urlObj.searchParams.delete('bpk-token');
+            urlObj.searchParams.delete('bk-precache');
+            urlObj.searchParams.delete('response');
+            targetManifest = urlObj.toString();
+            console.log('[TizeOSN] Stripped Broadpeak SSAI params from manifest URL ->', targetManifest);
+          } catch (e) {}
+        }
+
+        return origLoad.call(this, targetManifest, startTime, mimeType);
       };
 
       // Filter networking requests
@@ -494,8 +507,8 @@ function initShakaInterceptor() {
           netProto.request = function (type, request) {
             if (configRead('enableAdBlock') && request && request.uris) {
               for (let i = 0; i < request.uris.length; i++) {
-                if (isAdUrl(request.uris[i])) {
-                  notifyAdBlocked();
+                if (isAdUrl(request.uris[i]) || isBroadpeakSsaiUrl(request.uris[i])) {
+                  notifyAdBlocked('Shaka blocked ad network request');
                   return Promise.resolve({ data: new ArrayBuffer(0), headers: {} });
                 }
               }
@@ -508,7 +521,7 @@ function initShakaInterceptor() {
   }
 
   hookShaka();
-  setInterval(hookShaka, 1000);
+  setInterval(hookShaka, 800);
 }
 
 /**
@@ -541,7 +554,7 @@ function attachVideoAdSkipper(video) {
   if (skipBtn && configRead('enableAdBlock')) {
     try {
       skipBtn.click();
-      notifyAdBlocked();
+      notifyAdBlocked('Clicked on-screen skip button');
     } catch (e) {}
   }
 }
@@ -579,7 +592,7 @@ export function initAdBlock() {
     initAdEventsSuppressor();
     initShakaInterceptor();
     initVideoElementWatcher();
-    console.log('[TizeOSN] AdBlock Engine v1.0.3 initialized successfully.');
+    console.log('[TizeOSN] AdBlock Engine v1.0.4 initialized successfully.');
   } catch (err) {
     console.error('[TizeOSN] AdBlock initialization error:', err);
   }
