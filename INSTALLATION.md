@@ -22,22 +22,26 @@ This enables:
 Ensure you have the latest version of TizenBrew installed and running on your TV. If you need to install TizenBrew, refer to the [TizenBrew Repository](https://github.com/reisxd/TizenBrew) or use the [TizenBrewInstaller](https://github.com/reisxd/TizenBrewInstaller).
 
 ### Step 2: Navigate to Module Manager
-1. In the TizenBrew main menu, use your remote to select **Module Manager** at the top.
-2. Select the **Add Module** (or `+`) button.
+1. In the TizenBrew main menu, press the **🟢 Green Button** on your remote control (or navigate to **Module Manager** in the top bar).
 
-### Step 3: Enter the TizeOSN Repository Identifier
-In the text input field, type:
+### Step 3: Select "Add GitHub Module"
+1. Scroll past any existing modules to the action tiles at the end.
+2. Click on the tile titled **Add GitHub Module** (do **not** select Add NPM Module).
+
+### Step 4: Enter the Repository Name
+In the text box labeled `Module Name (For gh):`, type:
 ```text
-gh/iHosam/TizeOSN@main
+iHosam/TizeOSN@main
 ```
-*(Alternatively, if using an NPM release, enter `@tizeosn/tizeosn` or your custom fork).*
+*(Important: Do **NOT** prefix it with `gh/`. TizenBrew already handles the `gh/` prefix when you select the GitHub tile).*
 
-Click **Submit / OK**. TizenBrew will fetch the metadata from GitHub and register TizeOSN in your module list.
+3. Press **Done / Enter** on your TV's virtual keyboard.
+4. TizenBrew will register `gh/iHosam/TizeOSN@main` and navigate back to the module list.
 
-### Step 4: Launch TizeOSN
+### Step 5: Launch TizeOSN
 1. Return to the TizenBrew **Home** screen.
-2. You will see a new tile labeled **TizeOSN (1.0.0)**.
-3. Click on the tile. OSN+ will launch with full ad-blocking and enhancements activated!
+2. Select the **TizeOSN (1.0.0)** tile and press Enter.
+3. OSN+ will launch with full ad-blocking and enhancements activated!
 
 ---
 
