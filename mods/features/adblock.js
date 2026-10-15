@@ -48,6 +48,15 @@ const AD_PATTERNS = [
   /\/analytics\/ad/i,
   /\/tracking\/ad/i,
   /\/beacon\/ad/i,
+  /omweb-v1/i,
+  /omid-session-client/i,
+  /cdnweb\.anghami\.com\/.*osmsdk/i,
+  /cdnweb\.anghami\.com\/.*ad/i,
+  /broadpeak/i,
+  /bpkSession/i,
+  /adTracking/i,
+  /adMetrics/i,
+  /adPalSession/i,
 ];
 
 function isAdUrl(url) {
@@ -341,6 +350,38 @@ function initVideoElementWatcher() {
   });
 }
 
+function initShakaInterceptor() {
+  function hookShaka() {
+    if (typeof window !== 'undefined' && window.shaka && window.shaka.Player && !window.shaka._tizeosn_hooked) {
+      window.shaka._tizeosn_hooked = true;
+      var origLoad = window.shaka.Player.prototype.load;
+      window.shaka.Player.prototype.load = function () {
+        var player = this;
+        try {
+          if (player.getNetworkingEngine) {
+            var netEngine = player.getNetworkingEngine();
+            netEngine.registerRequestFilter(function (type, request) {
+              if (!configRead('enableAdBlock')) return;
+              if (request.uris) {
+                for (var i = 0; i < request.uris.length; i++) {
+                  if (isAdUrl(request.uris[i])) {
+                    notifyAdBlocked();
+                    request.uris.splice(i, 1);
+                    i--;
+                  }
+                }
+              }
+            });
+          }
+        } catch (e) {}
+        return origLoad.apply(this, arguments);
+      };
+    }
+  }
+  hookShaka();
+  setInterval(hookShaka, 1500);
+}
+
 /**
  * Main Initialization
  */
@@ -350,6 +391,7 @@ export function initAdBlock() {
     initXhrInterceptor();
     initJsonInterceptor();
     initImaMock();
+    initShakaInterceptor();
     initVideoElementWatcher();
     console.log('[TizeOSN] AdBlock Engine initialized successfully.');
   } catch (err) {

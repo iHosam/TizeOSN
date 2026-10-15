@@ -31,7 +31,7 @@ Ensure you have the latest version of TizenBrew installed and running on your TV
 ### Step 4: Enter the Repository Name
 In the text box labeled `Module Name (For gh):`, type:
 ```text
-iHosam/TizeOSN@main
+iHosam/TizeOSN@v1.0.2
 ```
 *(Important: Do **NOT** prefix it with `gh/`. TizenBrew already handles the `gh/` prefix when you select the GitHub tile).*
 

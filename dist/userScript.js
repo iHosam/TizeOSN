@@ -637,7 +637,7 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
   }
 
   // Known ad domains & path keywords
-  var AD_PATTERNS = [/googleads\.g\.doubleclick\.net/i, /pubads\.g\.doubleclick\.net/i, /securepubads\.g\.doubleclick\.net/i, /pagead2\.googlesyndication\.com/i, /imasdk\.googleapis\.com/i, /\.fwmrm\.net/i, /\.freewheel\.tv/i, /adnxs\.com/i, /rubiconproject\.com/i, /criteo\.com/i, /app\.adjust\.com/i, /\.appsflyer\.com/i, /api\.branch\.io/i, /api\.mixpanel\.com/i, /api\.moengage\.com/i, /\/api\/.*ads/i, /\/ad-breaks/i, /\/ad_breaks/i, /\/ad-pods/i, /adOpportunity/i, /\/adrule/i, /vast(\.xml|\?)/i, /vmap(\.xml|\?)/i, /vpaid/i, /\/telemetry\/ad/i, /\/analytics\/ad/i, /\/tracking\/ad/i, /\/beacon\/ad/i];
+  var AD_PATTERNS = [/googleads\.g\.doubleclick\.net/i, /pubads\.g\.doubleclick\.net/i, /securepubads\.g\.doubleclick\.net/i, /pagead2\.googlesyndication\.com/i, /imasdk\.googleapis\.com/i, /\.fwmrm\.net/i, /\.freewheel\.tv/i, /adnxs\.com/i, /rubiconproject\.com/i, /criteo\.com/i, /app\.adjust\.com/i, /\.appsflyer\.com/i, /api\.branch\.io/i, /api\.mixpanel\.com/i, /api\.moengage\.com/i, /\/api\/.*ads/i, /\/ad-breaks/i, /\/ad_breaks/i, /\/ad-pods/i, /adOpportunity/i, /\/adrule/i, /vast(\.xml|\?)/i, /vmap(\.xml|\?)/i, /vpaid/i, /\/telemetry\/ad/i, /\/analytics\/ad/i, /\/tracking\/ad/i, /\/beacon\/ad/i, /omweb-v1/i, /omid-session-client/i, /cdnweb\.anghami\.com\/.*osmsdk/i, /cdnweb\.anghami\.com\/.*ad/i, /broadpeak/i, /bpkSession/i, /adTracking/i, /adMetrics/i, /adPalSession/i];
   function isAdUrl(url) {
     if (!url || typeof url !== 'string') return false;
     for (var i = 0; i < AD_PATTERNS.length; i++) {
@@ -954,6 +954,37 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
       subtree: true
     });
   }
+  function initShakaInterceptor() {
+    function hookShaka() {
+      if (typeof window !== 'undefined' && window.shaka && window.shaka.Player && !window.shaka._tizeosn_hooked) {
+        window.shaka._tizeosn_hooked = true;
+        var origLoad = window.shaka.Player.prototype.load;
+        window.shaka.Player.prototype.load = function () {
+          var player = this;
+          try {
+            if (player.getNetworkingEngine) {
+              var netEngine = player.getNetworkingEngine();
+              netEngine.registerRequestFilter(function (type, request) {
+                if (!configRead('enableAdBlock')) return;
+                if (request.uris) {
+                  for (var i = 0; i < request.uris.length; i++) {
+                    if (isAdUrl(request.uris[i])) {
+                      notifyAdBlocked();
+                      request.uris.splice(i, 1);
+                      i--;
+                    }
+                  }
+                }
+              });
+            }
+          } catch (e) {}
+          return origLoad.apply(this, arguments);
+        };
+      }
+    }
+    hookShaka();
+    setInterval(hookShaka, 1500);
+  }
 
   /**
    * Main Initialization
@@ -964,6 +995,7 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
       initXhrInterceptor();
       initJsonInterceptor();
       initImaMock();
+      initShakaInterceptor();
       initVideoElementWatcher();
       console.log('[TizeOSN] AdBlock Engine initialized successfully.');
     } catch (err) {
