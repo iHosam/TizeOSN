@@ -26,13 +26,13 @@ const listeners = new Set();
 export function getConfig() {
   if (cachedConfig) return cachedConfig;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
     if (raw) {
       cachedConfig = Object.assign({}, DEFAULT_CONFIG, JSON.parse(raw));
       return cachedConfig;
     }
   } catch (e) {
-    console.warn('[TizeOSN] Failed to read config from localStorage:', e);
+    // Return fallback without throwing
   }
   cachedConfig = Object.assign({}, DEFAULT_CONFIG);
   return cachedConfig;
@@ -40,7 +40,7 @@ export function getConfig() {
 
 export function configRead(key) {
   const cfg = getConfig();
-  return cfg[key] !== undefined ? cfg[key] : DEFAULT_CONFIG[key];
+  return cfg && cfg[key] !== undefined ? cfg[key] : DEFAULT_CONFIG[key];
 }
 
 export function configWrite(key, value) {

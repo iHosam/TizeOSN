@@ -1,6 +1,10 @@
 /**
  * TizeOSN Spatial Navigation & TV Remote Key Handler
  * Maps Samsung Tizen TV remote keys (D-pad, Color keys, Media keys).
+ *
+ * NOTE: Media keys (Play, Pause, FastForward, Rewind) are registered with Tizen
+ * so the system forwards them, but we allow them to bubble naturally to OSN+'s
+ * native MediaKeyInterceptor so Shaka Player seeks smoothly without MSE pipeline desync.
  */
 
 import { toggleSettings, isSettingsVisible, handleModalKey } from '../ui/settings.js';
@@ -29,7 +33,7 @@ export function registerTizenDeviceKeys() {
       try {
         tizen.tvinputdevice.registerKey(key);
       } catch (e) {
-        console.debug('[TizeOSN] registerKey failed for:', key, e);
+        // Some older/newer remote models don't support certain color or track keys
       }
     });
   }
@@ -38,56 +42,8 @@ export function registerTizenDeviceKeys() {
 function getActiveVideo() {
   const videos = Array.from(document.querySelectorAll('video'));
   if (videos.length === 0) return null;
-  // Return the currently playing or largest video element
   const playing = videos.find((v) => !v.paused && v.duration > 0);
   return playing || videos[0];
-}
-
-function handleMediaKey(keyCode) {
-  const video = getActiveVideo();
-  if (!video) return false;
-
-  // MediaPlayPause (10252)
-  if (keyCode === 10252) {
-    if (video.paused) video.play();
-    else video.pause();
-    return true;
-  }
-
-  // MediaPlay (415)
-  if (keyCode === 415) {
-    video.play();
-    return true;
-  }
-
-  // MediaPause (19)
-  if (keyCode === 19) {
-    video.pause();
-    return true;
-  }
-
-  // MediaFastForward (417)
-  if (keyCode === 417) {
-    video.currentTime = Math.min(video.duration || 99999, video.currentTime + 10);
-    showToast('⏩ +10s');
-    return true;
-  }
-
-  // MediaRewind (412)
-  if (keyCode === 412) {
-    video.currentTime = Math.max(0, video.currentTime - 10);
-    showToast('⏪ -10s');
-    return true;
-  }
-
-  // MediaStop (413)
-  if (keyCode === 413) {
-    video.pause();
-    video.currentTime = 0;
-    return true;
-  }
-
-  return false;
 }
 
 function handleColorKey(keyCode) {
@@ -148,7 +104,7 @@ export function initSpatialNav() {
       if (handleModalKey(e)) return;
     }
 
-    // 2. Color keys
+    // 2. Color keys - TizeOSN custom shortcuts
     if ([403, 404, 405, 406].includes(code)) {
       if (handleColorKey(code)) {
         e.preventDefault();
@@ -157,14 +113,10 @@ export function initSpatialNav() {
       }
     }
 
-    // 3. Media keys
-    if ([10252, 415, 19, 417, 412, 413].includes(code)) {
-      if (handleMediaKey(code)) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-    }
+    // 3. Media keys (Play, Pause, FastForward 417, Rewind 412, Stop 413, PlayPause 10252)
+    // We intentionally DO NOT block or preventDefault here!
+    // Letting them pass through allows OSN+'s native MediaKeyInterceptor component
+    // to handle seeking (+10s / -10s) and playback state smoothly through Shaka.
   }, true);
 
   console.log('[TizeOSN] Spatial Navigation and Remote Keys ready.');

@@ -400,20 +400,20 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
   function getConfig() {
     if (cachedConfig) return cachedConfig;
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
+      var raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
       if (raw) {
         cachedConfig = Object.assign({}, DEFAULT_CONFIG, JSON.parse(raw));
         return cachedConfig;
       }
     } catch (e) {
-      console.warn('[TizeOSN] Failed to read config from localStorage:', e);
+      // Return fallback without throwing
     }
     cachedConfig = Object.assign({}, DEFAULT_CONFIG);
     return cachedConfig;
   }
   function configRead(key) {
     var cfg = getConfig();
-    return cfg[key] !== undefined ? cfg[key] : DEFAULT_CONFIG[key];
+    return cfg && cfg[key] !== undefined ? cfg[key] : DEFAULT_CONFIG[key];
   }
   function configWrite(key, value) {
     var cfg = getConfig();
@@ -623,23 +623,28 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
 
   /**
    * TizeOSN AdBlock Engine
-   * Multi-layer ad interceptor: Network (fetch/XHR), JSON parser, Video element, and IMA SDK neutralizer.
+   * Multi-layer ad interceptor: Network (fetch/XHR), JSON sanitizer, SSAI neutralizer,
+   * Shaka Player hooks, and DOM ad event suppressor.
    */
 
   var lastToastTime = 0;
   function notifyAdBlocked() {
     incrementBlockedAds();
     var now = Date.now();
-    if (now - lastToastTime > 3500) {
+    if (now - lastToastTime > 4000) {
       lastToastTime = now;
       showToast(t('toastAdBlocked'));
     }
   }
 
-  // Known ad domains & path keywords
-  var AD_PATTERNS = [/googleads\.g\.doubleclick\.net/i, /pubads\.g\.doubleclick\.net/i, /securepubads\.g\.doubleclick\.net/i, /pagead2\.googlesyndication\.com/i, /imasdk\.googleapis\.com/i, /\.fwmrm\.net/i, /\.freewheel\.tv/i, /adnxs\.com/i, /rubiconproject\.com/i, /criteo\.com/i, /app\.adjust\.com/i, /\.appsflyer\.com/i, /api\.branch\.io/i, /api\.mixpanel\.com/i, /api\.moengage\.com/i, /\/api\/.*ads/i, /\/ad-breaks/i, /\/ad_breaks/i, /\/ad-pods/i, /adOpportunity/i, /\/adrule/i, /vast(\.xml|\?)/i, /vmap(\.xml|\?)/i, /vpaid/i, /\/telemetry\/ad/i, /\/analytics\/ad/i, /\/tracking\/ad/i, /\/beacon\/ad/i, /omweb-v1/i, /omid-session-client/i, /cdnweb\.anghami\.com\/.*osmsdk/i, /cdnweb\.anghami\.com\/.*ad/i, /broadpeak/i, /bpkSession/i, /adTracking/i, /adMetrics/i, /adPalSession/i];
+  // Known ad tracking, metrics, and third-party ad server domains
+  var AD_PATTERNS = [/googleads\.g\.doubleclick\.net/i, /pubads\.g\.doubleclick\.net/i, /securepubads\.g\.doubleclick\.net/i, /pagead2\.googlesyndication\.com/i, /imasdk\.googleapis\.com/i, /\.fwmrm\.net/i, /\.freewheel\.tv/i, /adnxs\.com/i, /rubiconproject\.com/i, /criteo\.com/i, /app\.adjust\.com/i, /\.appsflyer\.com/i, /api\.branch\.io/i, /api\.mixpanel\.com/i, /api\.moengage\.com/i, /omweb-v1/i, /omid-session-client/i, /adTracking/i, /adMetrics/i, /adPalSession/i, /\/ad-breaks/i, /\/ad_breaks/i, /\/ad-pods/i, /adOpportunity/i, /\/adrule/i, /vast(\.xml|\?)/i, /vmap(\.xml|\?)/i, /vpaid/i, /\/telemetry\/ad/i, /\/analytics\/ad/i, /\/tracking\/ad/i, /\/beacon\/ad/i];
   function isAdUrl(url) {
     if (!url || typeof url !== 'string') return false;
+    // Never block core OSN API endpoints
+    if (url.includes('/osn/media/v1/') || url.includes('/osn/subs/v1/') || url.includes('/osn/account/v1/')) {
+      return false;
+    }
     for (var i = 0; i < AD_PATTERNS.length; i++) {
       if (AD_PATTERNS[i].test(url)) return true;
     }
@@ -647,17 +652,76 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
   }
 
   /**
+   * Deep object sanitizer to remove SSAI markers, cue points, and ad flags
+   */
+  function sanitizeAdData(obj) {
+    if (!obj || _typeof(obj) !== 'object') return obj;
+    if (Array.isArray(obj)) {
+      for (var i = 0; i < obj.length; i++) {
+        obj[i] = sanitizeAdData(obj[i]);
+      }
+      return obj;
+    }
+
+    // Core stream flags: tell player and Broadpeak that no ads are present
+    if ('hasAds' in obj) obj.hasAds = false;
+    if ('isAdSupported' in obj) obj.isAdSupported = false;
+    if ('adEnabled' in obj) obj.adEnabled = false;
+    if ('showAdsOnVideoStreaming' in obj) obj.showAdsOnVideoStreaming = false;
+
+    // Clear ad breaks & cue points
+    if ('adBreaks' in obj && Array.isArray(obj.adBreaks)) obj.adBreaks = [];
+    if ('adBreakDataList' in obj && Array.isArray(obj.adBreakDataList)) obj.adBreakDataList = [];
+    if ('adPods' in obj && Array.isArray(obj.adPods)) obj.adPods = [];
+    if ('adOpportunities' in obj && Array.isArray(obj.adOpportunities)) obj.adOpportunities = [];
+    if ('adPlacements' in obj && Array.isArray(obj.adPlacements)) obj.adPlacements = [];
+    if ('adSlots' in obj && Array.isArray(obj.adSlots)) obj.adSlots = [];
+    if ('midrolls' in obj && Array.isArray(obj.midrolls)) obj.midrolls = [];
+    if ('prerolls' in obj && Array.isArray(obj.prerolls)) obj.prerolls = [];
+    if ('postrolls' in obj && Array.isArray(obj.postrolls)) obj.postrolls = [];
+    if ('preroll' in obj && obj.preroll) obj.preroll = null;
+    if (obj.cuePoints && Array.isArray(obj.cuePoints)) {
+      obj.cuePoints = obj.cuePoints.filter(cp => !cp || !cp.type || !cp.type.toLowerCase().includes('ad'));
+    }
+
+    // Catalog promo trays
+    if (Array.isArray(obj.items)) {
+      obj.items = obj.items.filter(item => {
+        if (!item) return true;
+        if (item.type === 'ad' || item.isAd || item.adSlot) return false;
+        var title = (item.title || item.name || '').toLowerCase();
+        if (title.includes('upgrade to ad-free') || title.includes('ترقية باقة')) return false;
+        return true;
+      });
+    }
+    for (var _i = 0, _Object$keys = Object.keys(obj); _i < _Object$keys.length; _i++) {
+      var k = _Object$keys[_i];
+      if (_typeof(obj[k]) === 'object' && obj[k] !== null) {
+        obj[k] = sanitizeAdData(obj[k]);
+      }
+    }
+    return obj;
+  }
+
+  /**
    * 1. Network Interception: window.fetch
+   * Intercepts pure ad requests AND modifies OSN+ stream & entitlement responses
    */
   function initFetchInterceptor() {
     var originalFetch = window.fetch;
     if (!originalFetch) return;
     window.fetch = function (resource, init) {
       var url = typeof resource === 'string' ? resource : resource && resource.url || '';
-      if (configRead('enableAdBlock') && isAdUrl(url)) {
-        notifyAdBlocked();
 
-        // Return synthetic clean responses
+      // Check if ad blocking is active
+      var adBlockEnabled = configRead('enableAdBlock');
+      if (!adBlockEnabled) {
+        return originalFetch.apply(this, arguments);
+      }
+
+      // A. Intercept and block pure ad server / telemetry requests
+      if (isAdUrl(url)) {
+        notifyAdBlocked();
         if (url.includes('.xml') || url.includes('vast') || url.includes('vmap')) {
           return Promise.resolve(new Response('<?xml version="1.0" encoding="UTF-8"?><VAST version="3.0"/>', {
             status: 200,
@@ -684,6 +748,122 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
           statusText: 'No Content'
         }));
       }
+
+      // B. Intercept OSN+ Stream API: neutralize SSAI before player initializes
+      if (url.includes('/osn/media/v1/stream')) {
+        return originalFetch.apply(this, arguments).then(response => {
+          if (!response.ok) return response;
+          return response.text().then(rawText => {
+            try {
+              var data = JSON.parse(rawText);
+              if (data) {
+                data.hasAds = false;
+                if (data.adBreaks) data.adBreaks = [];
+                if (data.cuePoints) data.cuePoints = [];
+                notifyAdBlocked();
+                console.log('[TizeOSN] Neutralized hasAds in /osn/media/v1/stream -> Direct pristine DASH stream loaded.');
+              }
+              return new Response(JSON.stringify(data), {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+              });
+            } catch (e) {
+              return new Response(rawText, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+              });
+            }
+          });
+        });
+      }
+
+      // C. Intercept OSN+ Entitlements: enable Ad-Free & 4K profiles
+      if (url.includes('/osn/subs/v1/get-purchases-entitlements')) {
+        return originalFetch.apply(this, arguments).then(response => {
+          if (!response.ok) return response;
+          return response.text().then(rawText => {
+            try {
+              var data = JSON.parse(rawText);
+              if (data && data.entitlements) {
+                if (data.entitlements.videoStreamingEntitlement) {
+                  data.entitlements.videoStreamingEntitlement.showAdsOnVideoStreaming = false;
+                  data.entitlements.videoStreamingEntitlement.supportsVideoStreaming = true;
+                }
+                if (data.entitlements.videoStreamingQualityEntitlement) {
+                  data.entitlements.videoStreamingQualityEntitlement.supports4kQuality = true;
+                }
+                console.log('[TizeOSN] Enforced ad-free tier & 4K entitlements in response.');
+              }
+              return new Response(JSON.stringify(data), {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+              });
+            } catch (e) {
+              return new Response(rawText, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+              });
+            }
+          });
+        });
+      }
+
+      // D. Intercept OSN+ Playback Config: remove preroll video ads
+      if (url.includes('/osn/media/v1/get-playback-config')) {
+        return originalFetch.apply(this, arguments).then(response => {
+          if (!response.ok) return response;
+          return response.text().then(rawText => {
+            try {
+              var data = JSON.parse(rawText);
+              if (data && data.preroll) {
+                delete data.preroll;
+                data.preroll = null;
+                notifyAdBlocked();
+                console.log('[TizeOSN] Suppressed preroll video in /get-playback-config.');
+              }
+              return new Response(JSON.stringify(data), {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+              });
+            } catch (e) {
+              return new Response(rawText, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+              });
+            }
+          });
+        });
+      }
+
+      // E. Intercept OSN+ Watch Content: sanitize any catalog ad indicators
+      if (url.includes('/osn/media/v1/get-watch-content')) {
+        return originalFetch.apply(this, arguments).then(response => {
+          if (!response.ok) return response;
+          return response.text().then(rawText => {
+            try {
+              var data = JSON.parse(rawText);
+              sanitizeAdData(data);
+              return new Response(JSON.stringify(data), {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+              });
+            } catch (e) {
+              return new Response(rawText, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers
+              });
+            }
+          });
+        });
+      }
       return originalFetch.apply(this, arguments);
     };
   }
@@ -695,11 +875,12 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
     var originalOpen = XMLHttpRequest.prototype.open;
     var originalSend = XMLHttpRequest.prototype.send;
     XMLHttpRequest.prototype.open = function (method, url) {
-      this._tizeosn_url = url;
+      this._tizeosn_url = typeof url === 'string' ? url : url && url.toString() || '';
       return originalOpen.apply(this, arguments);
     };
     XMLHttpRequest.prototype.send = function () {
-      if (configRead('enableAdBlock') && isAdUrl(this._tizeosn_url)) {
+      var url = this._tizeosn_url;
+      if (configRead('enableAdBlock') && isAdUrl(url)) {
         notifyAdBlocked();
         Object.defineProperty(this, 'readyState', {
           writable: true,
@@ -709,7 +890,7 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
           writable: true,
           value: 200
         });
-        if (this._tizeosn_url && (this._tizeosn_url.includes('.xml') || this._tizeosn_url.includes('vast'))) {
+        if (url && (url.includes('.xml') || url.includes('vast'))) {
           Object.defineProperty(this, 'responseText', {
             writable: true,
             value: '<?xml version="1.0" encoding="UTF-8"?><VAST version="3.0"/>'
@@ -734,67 +915,47 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
         }, 10);
         return;
       }
+
+      // Hook onload for core OSN endpoints via XHR if any
+      if (url && (url.includes('/osn/media/v1/stream') || url.includes('/osn/subs/v1/get-purchases-entitlements'))) {
+        var origOnload = this.onload;
+        this.onload = function () {
+          try {
+            if (this.responseText) {
+              var data = JSON.parse(this.responseText);
+              sanitizeAdData(data);
+              Object.defineProperty(this, 'responseText', {
+                writable: true,
+                value: JSON.stringify(data)
+              });
+            }
+          } catch (e) {}
+          if (typeof origOnload === 'function') origOnload.apply(this, arguments);
+        };
+      }
       return originalSend.apply(this, arguments);
     };
   }
 
   /**
-   * 3. JSON.parse Interceptor: Strip Ad Placements & Cue Points
+   * 3. Safe JSON.parse Interceptor (re-entrancy protected)
    */
-  function sanitizeAdData(obj) {
-    if (!obj || _typeof(obj) !== 'object') return obj;
-    if (Array.isArray(obj)) {
-      for (var i = 0; i < obj.length; i++) {
-        obj[i] = sanitizeAdData(obj[i]);
-      }
-      return obj;
-    }
-
-    // Strip ad properties
-    if (obj.adBreaks) obj.adBreaks = [];
-    if (obj.adPods) obj.adPods = [];
-    if (obj.adOpportunities) obj.adOpportunities = [];
-    if (obj.adPlacements) obj.adPlacements = [];
-    if (obj.adSlots) obj.adSlots = [];
-    if (obj.midrolls) obj.midrolls = [];
-    if (obj.prerolls) obj.prerolls = [];
-    if (obj.postrolls) obj.postrolls = [];
-    if (obj.cuePoints) {
-      // Keep non-ad cue points if any, remove ad cue points
-      obj.cuePoints = Array.isArray(obj.cuePoints) ? obj.cuePoints.filter(cp => !cp.type || !cp.type.includes('ad')) : [];
-    }
-
-    // Stream configuration flags
-    if ('hasAds' in obj) obj.hasAds = false;
-    if ('isAdSupported' in obj) obj.isAdSupported = false;
-    if ('adEnabled' in obj) obj.adEnabled = false;
-
-    // Filter catalog promotional / upsell trays
-    if (Array.isArray(obj.items)) {
-      obj.items = obj.items.filter(item => {
-        if (!item) return true;
-        if (item.type === 'ad' || item.isAd || item.adSlot) return false;
-        var title = (item.title || item.name || '').toLowerCase();
-        if (title.includes('upgrade to ad-free') || title.includes('ترقية باقة')) return false;
-        return true;
-      });
-    }
-    for (var k in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, k) && _typeof(obj[k]) === 'object') {
-        obj[k] = sanitizeAdData(obj[k]);
-      }
-    }
-    return obj;
-  }
+  var inJsonSanitizer = false;
   function initJsonInterceptor() {
     var origParse = JSON.parse;
     JSON.parse = function () {
       var res = origParse.apply(this, arguments);
-      if (!configRead('enableAdBlock')) return res;
+      if (inJsonSanitizer) return res;
+      inJsonSanitizer = true;
       try {
-        return sanitizeAdData(res);
+        if (res && _typeof(res) === 'object') {
+          sanitizeAdData(res);
+        }
+        return res;
       } catch (e) {
         return res;
+      } finally {
+        inJsonSanitizer = false;
       }
     };
   }
@@ -814,10 +975,10 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
     };
     MockAdsLoader.prototype.requestAds = function () {
       var self = this;
-      setTimeout(function () {
+      setTimeout(() => {
         if (typeof self._onLoaded === 'function') {
           self._onLoaded({
-            getAdsManager: function getAdsManager() {
+            getAdsManager() {
               return new MockAdsManager();
             }
           });
@@ -831,7 +992,7 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
     MockAdsManager.prototype.init = function () {};
     MockAdsManager.prototype.start = function () {
       var self = this;
-      setTimeout(function () {
+      setTimeout(() => {
         if (typeof self._onEvent === 'function') {
           self._onEvent({
             type: 'allAdsCompleted'
@@ -861,8 +1022,8 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
       AdDisplayContainer: MockAdDisplayContainer,
       AdsLoader: MockAdsLoader,
       AdsManager: MockAdsManager,
-      AdsRenderingSettings: function AdsRenderingSettings() {},
-      ImaSdkSettings: function ImaSdkSettings() {},
+      AdsRenderingSettings() {},
+      ImaSdkSettings() {},
       ViewMode: {
         NORMAL: 'normal',
         FULLSCREEN: 'fullscreen'
@@ -884,7 +1045,65 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
   }
 
   /**
-   * 5. Video Element Ad Fast-Forward & Skipper
+   * 5. Broadpeak / Apollo Ad DOM Event Suppressor
+   * Prevents Apollo UI from switching to the PlayerAdsOverlay
+   */
+  function initAdEventsSuppressor() {
+    var adEvents = ['onadbreakbegin', 'onadbegin', 'onadskippable', 'onaddata', 'onadend', 'onadbreakend'];
+    adEvents.forEach(evtName => {
+      document.addEventListener(evtName, e => {
+        if (!configRead('enableAdBlock')) return;
+        e.stopImmediatePropagation();
+        console.debug('[TizeOSN] Suppressed SSAI DOM event:', evtName);
+      }, true);
+    });
+  }
+
+  /**
+   * 6. Shaka Player & Networking Engine Interceptor
+   */
+  function initShakaInterceptor() {
+    function hookShaka() {
+      if (typeof window !== 'undefined' && window.shaka && window.shaka.Player && !window.shaka._tizeosn_hooked) {
+        window.shaka._tizeosn_hooked = true;
+
+        // Hook Shaka player load
+        var origLoad = window.shaka.Player.prototype.load;
+        window.shaka.Player.prototype.load = function (asset, startTime, mimeType) {
+          console.log('[TizeOSN] Shaka Player loading asset:', typeof asset === 'string' ? asset : asset && asset.manifestUrl || asset);
+          return origLoad.apply(this, arguments);
+        };
+
+        // Filter networking requests
+        try {
+          var netProto = window.shaka.net && window.shaka.net.NetworkingEngine && window.shaka.net.NetworkingEngine.prototype;
+          if (netProto && netProto.request && !netProto._tizeosn_hooked) {
+            netProto._tizeosn_hooked = true;
+            var origRequest = netProto.request;
+            netProto.request = function (type, request) {
+              if (configRead('enableAdBlock') && request && request.uris) {
+                for (var i = 0; i < request.uris.length; i++) {
+                  if (isAdUrl(request.uris[i])) {
+                    notifyAdBlocked();
+                    return Promise.resolve({
+                      data: new ArrayBuffer(0),
+                      headers: {}
+                    });
+                  }
+                }
+              }
+              return origRequest.apply(this, arguments);
+            };
+          }
+        } catch (e) {}
+      }
+    }
+    hookShaka();
+    setInterval(hookShaka, 1000);
+  }
+
+  /**
+   * 7. Video Element Ad Watcher (Safe: never modifies currentTime of main content)
    */
   function attachVideoAdSkipper(video) {
     if (video._tizeosn_attached) return;
@@ -892,22 +1111,18 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
     video.addEventListener('timeupdate', () => {
       if (!configRead('enableAdBlock')) return;
 
-      // Detect if this video is currently an ad
-      var isShortAd = video.duration && video.duration > 0 && video.duration < 65;
-      var parentHasAdClass = video.closest('[class*="ad-"], [class*="AdContainer"], [class*="adContainer"], [id*="ad-"]');
-      var srcHasAd = video.src && isAdUrl(video.src);
-      if (parentHasAdClass || srcHasAd || isShortAd && video.getAttribute('data-is-ad') === 'true') {
+      // Standalone ad elements (like prerolls with dedicated container or data-is-ad)
+      var isExplicitAdContainer = video.closest('[class*="AdContainer"], [class*="adContainer"], [id*="adContainer"], [class*="PrerollVideo"]');
+      var isMarkedAd = video.getAttribute('data-is-ad') === 'true';
+      if (isExplicitAdContainer || isMarkedAd) {
         notifyAdBlocked();
         video.muted = true;
         video.playbackRate = 16.0;
-        if (video.duration && isFinite(video.duration)) {
-          video.currentTime = video.duration - 0.1;
-        }
       }
     });
 
-    // Watch for any skip button overlays on screen
-    var skipBtn = document.querySelector('.videoAdUiSkipButton, [class*="skip-ad"], [class*="skipAd"], [aria-label*="Skip Ad"], [aria-label*="تخطي"]');
+    // Watch for skip buttons in DOM
+    var skipBtn = document.querySelector('.videoAdUiSkipButton, [class*="skip-ad"], [class*="skipAd"], [aria-label*="Skip Ad"], [aria-label*="تخطي الاعلان"], [aria-label*="تخطي"]');
     if (skipBtn && configRead('enableAdBlock')) {
       try {
         skipBtn.click();
@@ -916,10 +1131,7 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
     }
   }
   function initVideoElementWatcher() {
-    // Check existing video elements
     document.querySelectorAll('video').forEach(attachVideoAdSkipper);
-
-    // Watch for newly added video elements
     var observer = new MutationObserver(mutations => {
       var _iterator2 = _createForOfIteratorHelper(mutations),
         _step2;
@@ -954,37 +1166,6 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
       subtree: true
     });
   }
-  function initShakaInterceptor() {
-    function hookShaka() {
-      if (typeof window !== 'undefined' && window.shaka && window.shaka.Player && !window.shaka._tizeosn_hooked) {
-        window.shaka._tizeosn_hooked = true;
-        var origLoad = window.shaka.Player.prototype.load;
-        window.shaka.Player.prototype.load = function () {
-          var player = this;
-          try {
-            if (player.getNetworkingEngine) {
-              var netEngine = player.getNetworkingEngine();
-              netEngine.registerRequestFilter(function (type, request) {
-                if (!configRead('enableAdBlock')) return;
-                if (request.uris) {
-                  for (var i = 0; i < request.uris.length; i++) {
-                    if (isAdUrl(request.uris[i])) {
-                      notifyAdBlocked();
-                      request.uris.splice(i, 1);
-                      i--;
-                    }
-                  }
-                }
-              });
-            }
-          } catch (e) {}
-          return origLoad.apply(this, arguments);
-        };
-      }
-    }
-    hookShaka();
-    setInterval(hookShaka, 1500);
-  }
 
   /**
    * Main Initialization
@@ -995,9 +1176,10 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
       initXhrInterceptor();
       initJsonInterceptor();
       initImaMock();
+      initAdEventsSuppressor();
       initShakaInterceptor();
       initVideoElementWatcher();
-      console.log('[TizeOSN] AdBlock Engine initialized successfully.');
+      console.log('[TizeOSN] AdBlock Engine v1.0.3 initialized successfully.');
     } catch (err) {
       console.error('[TizeOSN] AdBlock initialization error:', err);
     }
@@ -1387,6 +1569,10 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
   /**
    * TizeOSN Spatial Navigation & TV Remote Key Handler
    * Maps Samsung Tizen TV remote keys (D-pad, Color keys, Media keys).
+   *
+   * NOTE: Media keys (Play, Pause, FastForward, Rewind) are registered with Tizen
+   * so the system forwards them, but we allow them to bubble naturally to OSN+'s
+   * native MediaKeyInterceptor so Shaka Player seeks smoothly without MSE pipeline desync.
    */
 
   var TIZEN_KEYS = ['ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue', 'MediaPlayPause', 'MediaPlay', 'MediaPause', 'MediaStop', 'MediaFastForward', 'MediaRewind', 'MediaTrackNext', 'MediaTrackPrevious'];
@@ -1396,7 +1582,7 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
         try {
           tizen.tvinputdevice.registerKey(key);
         } catch (e) {
-          console.debug('[TizeOSN] registerKey failed for:', key, e);
+          // Some older/newer remote models don't support certain color or track keys
         }
       });
     }
@@ -1404,53 +1590,8 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
   function getActiveVideo() {
     var videos = Array.from(document.querySelectorAll('video'));
     if (videos.length === 0) return null;
-    // Return the currently playing or largest video element
     var playing = videos.find(v => !v.paused && v.duration > 0);
     return playing || videos[0];
-  }
-  function handleMediaKey(keyCode) {
-    var video = getActiveVideo();
-    if (!video) return false;
-
-    // MediaPlayPause (10252)
-    if (keyCode === 10252) {
-      if (video.paused) video.play();else video.pause();
-      return true;
-    }
-
-    // MediaPlay (415)
-    if (keyCode === 415) {
-      video.play();
-      return true;
-    }
-
-    // MediaPause (19)
-    if (keyCode === 19) {
-      video.pause();
-      return true;
-    }
-
-    // MediaFastForward (417)
-    if (keyCode === 417) {
-      video.currentTime = Math.min(video.duration || 99999, video.currentTime + 10);
-      showToast('⏩ +10s');
-      return true;
-    }
-
-    // MediaRewind (412)
-    if (keyCode === 412) {
-      video.currentTime = Math.max(0, video.currentTime - 10);
-      showToast('⏪ -10s');
-      return true;
-    }
-
-    // MediaStop (413)
-    if (keyCode === 413) {
-      video.pause();
-      video.currentTime = 0;
-      return true;
-    }
-    return false;
   }
   function handleColorKey(keyCode) {
     // Red Key (403): Toggle Settings Modal
@@ -1505,7 +1646,7 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
         if (handleModalKey(e)) return;
       }
 
-      // 2. Color keys
+      // 2. Color keys - TizeOSN custom shortcuts
       if ([403, 404, 405, 406].includes(code)) {
         if (handleColorKey(code)) {
           e.preventDefault();
@@ -1514,14 +1655,10 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
         }
       }
 
-      // 3. Media keys
-      if ([10252, 415, 19, 417, 412, 413].includes(code)) {
-        if (handleMediaKey(code)) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-      }
+      // 3. Media keys (Play, Pause, FastForward 417, Rewind 412, Stop 413, PlayPause 10252)
+      // We intentionally DO NOT block or preventDefault here!
+      // Letting them pass through allows OSN+'s native MediaKeyInterceptor component
+      // to handle seeking (+10s / -10s) and playback state smoothly through Shaka.
     }, true);
     console.log('[TizeOSN] Spatial Navigation and Remote Keys ready.');
   }
@@ -1562,7 +1699,7 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
    * TizeOSN - Ad-Free OSN+ Client for Samsung Smart TVs (Tizen OS)
    * Launched via TizenBrew
    *
-   * @version 1.0.0
+   * @version 1.0.3
    * @author TizeOSN Contributors
    * @license GPL-3.0-only
    */
@@ -1574,7 +1711,7 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
       return;
     }
     window.__TIZEOSN_INITIALIZED__ = true;
-    console.log('%c🛡️ TizeOSN v1.0.0 Active %c| Ad-Free OSN+ for TizenBrew', 'background: #0284c7; color: #fff; font-weight: bold; padding: 4px 8px; border-radius: 4px;', 'color: #38bdf8; font-weight: bold;');
+    console.log('%c🛡️ TizeOSN v1.0.3 Active %c| Ad-Free OSN+ for TizenBrew', 'background: #0284c7; color: #fff; font-weight: bold; padding: 4px 8px; border-radius: 4px;', 'color: #38bdf8; font-weight: bold;');
 
     // 1. Initialize environment compatibility
     initUserAgentSpoofing();
@@ -1633,11 +1770,11 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
         addOnScreenBadge();
-        showToast(`${t('appName')} v1.0.0 Ready!`);
+        showToast(`${t('appName')} v1.0.3 Ready!`);
       });
     } else {
       addOnScreenBadge();
-      showToast(`${t('appName')} v1.0.0 Ready!`);
+      showToast(`${t('appName')} v1.0.3 Ready!`);
     }
   })();
 })();

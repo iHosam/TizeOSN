@@ -2,7 +2,7 @@
  * TizeOSN - Ad-Free OSN+ Client for Samsung Smart TVs (Tizen OS)
  * Launched via TizenBrew
  *
- * @version 1.0.0
+ * @version 1.0.3
  * @author TizeOSN Contributors
  * @license GPL-3.0-only
  */
@@ -28,7 +28,7 @@ import { t } from './translations/index.js';
   window.__TIZEOSN_INITIALIZED__ = true;
 
   console.log(
-    '%c🛡️ TizeOSN v1.0.0 Active %c| Ad-Free OSN+ for TizenBrew',
+    '%c🛡️ TizeOSN v1.0.3 Active %c| Ad-Free OSN+ for TizenBrew',
     'background: #0284c7; color: #fff; font-weight: bold; padding: 4px 8px; border-radius: 4px;',
     'color: #38bdf8; font-weight: bold;'
   );
@@ -93,10 +93,10 @@ import { t } from './translations/index.js';
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       addOnScreenBadge();
-      showToast(`${t('appName')} v1.0.0 Ready!`);
+      showToast(`${t('appName')} v1.0.3 Ready!`);
     });
   } else {
     addOnScreenBadge();
-    showToast(`${t('appName')} v1.0.0 Ready!`);
+    showToast(`${t('appName')} v1.0.3 Ready!`);
   }
 })();
