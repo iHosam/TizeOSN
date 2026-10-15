@@ -28,7 +28,7 @@ Ensure you have the latest version of TizenBrew installed and running on your TV
 ### Step 3: Enter the TizeOSN Repository Identifier
 In the text input field, type:
 ```text
-gh/halha/TizeOSN@main
+gh/iHosam/TizeOSN@main
 ```
 *(Alternatively, if using an NPM release, enter `@tizeosn/tizeosn` or your custom fork).*
 

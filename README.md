@@ -62,7 +62,7 @@ TizenBrew is a homebrew loader and package manager for Samsung Tizen TVs that al
 3. Click **Add Module**.
 4. Enter the GitHub repository identifier for TizeOSN:
    ```text
-   gh/halha/TizeOSN@main
+   gh/iHosam/TizeOSN@main
    ```
    *(Or your custom repository/npm package name).*
 5. Confirm and return to the **Home** screen.
@@ -111,7 +111,7 @@ To modify, customize, or build the bundle yourself:
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/halha/TizeOSN.git
+   git clone https://github.com/iHosam/TizeOSN.git
    cd TizeOSN
    ```
 
